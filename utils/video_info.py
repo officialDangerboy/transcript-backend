@@ -1,15 +1,18 @@
-from youtube_transcript_api import YouTubeTranscriptApi
+import requests
 
 def get_video_info(video_id):
     try:
         thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
         
+        video_title = f"Video {video_id}"
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            first_transcript = list(transcript_list)[0]
-            video_title = f"Video {video_id}"
+            oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+            response = requests.get(oembed_url, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                video_title = data.get('title', f"Video {video_id}")
         except:
-            video_title = f"Video {video_id}"
+            pass
         
         return {
             'success': True,

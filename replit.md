@@ -26,15 +26,22 @@ A professional web application that extracts YouTube video transcripts and gener
 - Added tabbed interface for transcript, plain text, and summary views
 - Integrated copy to clipboard and download functionality
 - Configured Flask app to run on port 5000 with proper cache control
+- **CRITICAL FIX**: Disabled Flask debug mode for production security
+- **API UPDATE**: Upgraded youtube-transcript-api from 0.6.1 to 1.2.3 to fix YouTube blocking issues
+- **ENHANCEMENT**: Implemented real video metadata retrieval using YouTube oEmbed API
+- **IMPROVEMENT**: Added comprehensive retry mechanism (3 attempts) for transcript fetching
+- **DEPENDENCY**: Added requests library for HTTP operations
+- Updated code to use new YouTubeTranscriptApi instance-based methods
 
 ## Technology Stack
 
 ### Backend
 - **Flask 3.0.0** - Web framework
-- **youtube-transcript-api 0.6.1** - Transcript extraction
+- **youtube-transcript-api 1.2.3** - Transcript extraction (upgraded from 0.6.1)
 - **sumy 0.11.0** - AI summarization (LexRank algorithm)
 - **nltk 3.8.1** - Natural language processing
 - **flask-cors 4.0.0** - Cross-origin resource sharing
+- **requests 2.32.3** - HTTP library for video metadata
 
 ### Frontend
 - **TailwindCSS** - Styling and responsive design

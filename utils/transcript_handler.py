@@ -1,7 +1,11 @@
 import re
 import time
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-from youtube_transcript_api._errors import VideoUnavailable
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import (
+    TranscriptsDisabled,
+    NoTranscriptFound,
+    VideoUnavailable
+)
 from xml.etree.ElementTree import ParseError
 
 def extract_video_id(url):
@@ -26,26 +30,25 @@ def get_transcript(video_id, language='en'):
     
     for attempt in range(max_retries):
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            api = YouTubeTranscriptApi()
             
             try:
-                transcript = transcript_list.find_transcript([language])
-            except:
+                result = api.fetch(video_id, languages=[language])
+            except (NoTranscriptFound, Exception):
                 try:
-                    transcript = transcript_list.find_generated_transcript(['en'])
+                    result = api.fetch(video_id, languages=['en'])
                 except:
-                    available_transcripts = list(transcript_list)
-                    if available_transcripts:
-                        transcript = available_transcripts[0]
-                    else:
-                        raise NoTranscriptFound(video_id, [], None)
+                    result = api.fetch(video_id)
             
-            transcript_data = transcript.fetch()
+            transcript_data = [
+                {'text': snippet.text, 'start': snippet.start, 'duration': snippet.duration}
+                for snippet in result.snippets
+            ]
             
             return {
                 'success': True,
                 'transcript': transcript_data,
-                'language': transcript.language_code
+                'language': result.language_code
             }
         
         except TranscriptsDisabled:
@@ -99,7 +102,8 @@ def get_transcript(video_id, language='en'):
 
 def get_available_languages(video_id):
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        api = YouTubeTranscriptApi()
+        transcript_list = api.list(video_id)
         
         languages = []
         for transcript in transcript_list:
@@ -107,7 +111,7 @@ def get_available_languages(video_id):
                 'code': transcript.language_code,
                 'name': transcript.language,
                 'is_generated': transcript.is_generated,
-                'is_translatable': transcript.is_translatable
+                'is_translatable': getattr(transcript, 'is_translatable', False)
             })
         
         return {

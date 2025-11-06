@@ -19,27 +19,35 @@ def index():
 def get_transcript_endpoint():
     try:
         data = request.json
-        url = data.get('url', '')
-        language = data.get('language', 'en')
-        include_timestamps = data.get('include_timestamps', True)
         
-        video_id = extract_video_id(url)
+        # Accept either 'video_id' or 'url'
+        video_id = data.get('video_id')
+        url = data.get('url', '')
+        include_timestamps = data.get('include_timestamps', True)
+        language = data.get('language', None)  # None = auto-detect
+        
+        # If video_id not provided, try extracting from URL
+        if not video_id:
+            video_id = extract_video_id(url)
         
         if not video_id:
             return jsonify({
                 'success': False,
-                'error': 'Please enter a valid YouTube URL'
+                'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
         
+        # Get transcript with auto language detection
         transcript_result = get_transcript(video_id, language)
         
         if not transcript_result['success']:
             return jsonify(transcript_result), 400
         
+        # Get video info
         video_info_result = get_video_info(video_id)
         
         transcript_data = transcript_result['transcript']
         
+        # Format transcript
         if include_timestamps:
             formatted_transcript = format_transcript_with_timestamps(transcript_data)
         else:
@@ -52,12 +60,15 @@ def get_transcript_endpoint():
         
         return jsonify({
             'success': True,
+            'video_id': video_id,
             'transcript': formatted_transcript,
             'plain_text': plain_text,
             'video_info': video_info_result,
             'word_count': word_count,
             'char_count': char_count,
-            'language': transcript_result['language']
+            'language': transcript_result['language'],
+            'language_name': transcript_result.get('language_name', ''),
+            'auto_detected': transcript_result.get('auto_detected', False)
         })
     
     except Exception as e:
@@ -70,19 +81,24 @@ def get_transcript_endpoint():
 def get_summary_endpoint():
     try:
         data = request.json
+        
+        # Accept either 'video_id' or 'url'
+        video_id = data.get('video_id')
         url = data.get('url', '')
         language = data.get('language', 'en')
         length = data.get('length', 'medium')
         
-        start_time = time.time()
-        
-        video_id = extract_video_id(url)
+        # If video_id not provided, try extracting from URL
+        if not video_id:
+            video_id = extract_video_id(url)
         
         if not video_id:
             return jsonify({
                 'success': False,
-                'error': 'Please enter a valid YouTube URL'
+                'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
+        
+        start_time = time.time()
         
         transcript_result = get_transcript(video_id, language)
         
@@ -102,6 +118,7 @@ def get_summary_endpoint():
         
         return jsonify({
             'success': True,
+            'video_id': video_id,
             'summary': summary_result['summary'],
             'word_count': summary_result['word_count'],
             'reading_time': summary_result['reading_time'],
@@ -120,14 +137,19 @@ def get_summary_endpoint():
 def get_languages_endpoint():
     try:
         data = request.json
+        
+        # Accept either 'video_id' or 'url'
+        video_id = data.get('video_id')
         url = data.get('url', '')
         
-        video_id = extract_video_id(url)
+        # If video_id not provided, try extracting from URL
+        if not video_id:
+            video_id = extract_video_id(url)
         
         if not video_id:
             return jsonify({
                 'success': False,
-                'error': 'Please enter a valid YouTube URL'
+                'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
         
         languages_result = get_available_languages(video_id)

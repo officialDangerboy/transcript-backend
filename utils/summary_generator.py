@@ -6,6 +6,13 @@ from sumy.nlp.stemmers import Stemmer
 from sumy.utils import get_stop_words
 import re
 
+# Download required NLTK data
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+    nltk.download('punkt_tab')
+
 def clean_text(text):
     text = re.sub(r'\[.*?\]', '', text)
     text = re.sub(r'\s+', ' ', text)

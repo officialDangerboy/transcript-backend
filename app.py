@@ -8,14 +8,6 @@ from utils.summary_generator import generate_summary
 from utils.video_info import get_video_info
 import time
 import os
-import logging
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -56,9 +48,6 @@ def get_transcript_endpoint():
                 'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
         
-        logger.info(f"Fetching transcript for video: {video_id}")
-        
-        # Get transcript with cookie support from environment variable
         transcript_result = get_transcript(
             video_id, 
             language,
@@ -67,7 +56,6 @@ def get_transcript_endpoint():
         )
         
         if not transcript_result['success']:
-            logger.error(f"Transcript fetch failed: {transcript_result.get('error')}")
             return jsonify(transcript_result), 400
         
         video_info_result = get_video_info(video_id)
@@ -83,8 +71,6 @@ def get_transcript_endpoint():
         word_count = len(plain_text.split())
         char_count = len(plain_text)
         
-        logger.info(f"Transcript fetched successfully: {word_count} words")
-        
         return jsonify({
             'success': True,
             'video_id': video_id,
@@ -99,7 +85,6 @@ def get_transcript_endpoint():
         })
     
     except Exception as e:
-        logger.error(f"Error in transcript endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'An error occurred: {str(e)}'
@@ -124,7 +109,6 @@ def get_summary_endpoint():
                 'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
         
-        logger.info(f"Generating summary for video: {video_id}")
         start_time = time.time()
         
         transcript_result = get_transcript(
@@ -146,8 +130,6 @@ def get_summary_endpoint():
         video_info_result = get_video_info(video_id)
         processing_time = round(time.time() - start_time, 2)
         
-        logger.info(f"Summary generated in {processing_time}s")
-        
         return jsonify({
             'success': True,
             'video_id': video_id,
@@ -160,7 +142,6 @@ def get_summary_endpoint():
         })
     
     except Exception as e:
-        logger.error(f"Error in summary endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'An error occurred: {str(e)}'
@@ -168,10 +149,6 @@ def get_summary_endpoint():
 
 @app.route('/api/languages', methods=['POST'])
 def get_languages_endpoint():
-    """
-    Get available languages for a video
-    No proxy or cookies needed - simple API call
-    """
     try:
         data = request.json
         
@@ -187,7 +164,6 @@ def get_languages_endpoint():
                 'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
         
-        # Simplified call - no proxy or cookies
         languages_result = get_available_languages(video_id)
         
         if not languages_result['success']:
@@ -196,7 +172,6 @@ def get_languages_endpoint():
         return jsonify(languages_result)
     
     except Exception as e:
-        logger.error(f"Error in languages endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'An error occurred: {str(e)}'
@@ -217,7 +192,6 @@ def not_found(e):
 
 @app.errorhandler(500)
 def internal_error(e):
-    logger.error(f"Internal server error: {str(e)}", exc_info=True)
     return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':

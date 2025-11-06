@@ -7,26 +7,46 @@ from utils.transcript_handler import (
 from utils.summary_generator import generate_summary
 from utils.video_info import get_video_info
 import time
+import os
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app)
+
+# CORS configuration
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/health')
+def health():
+    """Health check endpoint for Railway"""
+    return jsonify({'status': 'healthy', 'service': 'youtube-transcript-api'}), 200
 
 @app.route('/api/transcript', methods=['POST'])
 def get_transcript_endpoint():
     try:
         data = request.json
         
-        # Accept either 'video_id' or 'url'
         video_id = data.get('video_id')
         url = data.get('url', '')
         include_timestamps = data.get('include_timestamps', True)
-        language = data.get('language', None)  # None = auto-detect
+        language = data.get('language', None)
         
-        # If video_id not provided, try extracting from URL
         if not video_id:
             video_id = extract_video_id(url)
         
@@ -36,18 +56,23 @@ def get_transcript_endpoint():
                 'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
         
-        # Get transcript with auto language detection
-        transcript_result = get_transcript(video_id, language)
+        logger.info(f"Fetching transcript for video: {video_id}")
+        
+        # Get transcript with cookie support
+        transcript_result = get_transcript(
+            video_id, 
+            language,
+            use_cookies=True,
+            cookie_file=os.getenv('COOKIE_FILE', 'utils/cookies.txt')
+        )
         
         if not transcript_result['success']:
+            logger.error(f"Transcript fetch failed: {transcript_result.get('error')}")
             return jsonify(transcript_result), 400
         
-        # Get video info
         video_info_result = get_video_info(video_id)
-        
         transcript_data = transcript_result['transcript']
         
-        # Format transcript
         if include_timestamps:
             formatted_transcript = format_transcript_with_timestamps(transcript_data)
         else:
@@ -57,6 +82,8 @@ def get_transcript_endpoint():
         
         word_count = len(plain_text.split())
         char_count = len(plain_text)
+        
+        logger.info(f"Transcript fetched successfully: {word_count} words")
         
         return jsonify({
             'success': True,
@@ -72,6 +99,7 @@ def get_transcript_endpoint():
         })
     
     except Exception as e:
+        logger.error(f"Error in transcript endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'An error occurred: {str(e)}'
@@ -82,13 +110,11 @@ def get_summary_endpoint():
     try:
         data = request.json
         
-        # Accept either 'video_id' or 'url'
         video_id = data.get('video_id')
         url = data.get('url', '')
         language = data.get('language', 'en')
         length = data.get('length', 'medium')
         
-        # If video_id not provided, try extracting from URL
         if not video_id:
             video_id = extract_video_id(url)
         
@@ -98,23 +124,29 @@ def get_summary_endpoint():
                 'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
         
+        logger.info(f"Generating summary for video: {video_id}")
         start_time = time.time()
         
-        transcript_result = get_transcript(video_id, language)
+        transcript_result = get_transcript(
+            video_id, 
+            language,
+            use_cookies=True,
+            cookie_file=os.getenv('COOKIE_FILE', 'utils/cookies.txt')
+        )
         
         if not transcript_result['success']:
             return jsonify(transcript_result), 400
         
         plain_text = format_transcript_plain(transcript_result['transcript'])
-        
         summary_result = generate_summary(plain_text, length)
         
         if not summary_result['success']:
             return jsonify(summary_result), 400
         
         video_info_result = get_video_info(video_id)
-        
         processing_time = round(time.time() - start_time, 2)
+        
+        logger.info(f"Summary generated in {processing_time}s")
         
         return jsonify({
             'success': True,
@@ -128,6 +160,7 @@ def get_summary_endpoint():
         })
     
     except Exception as e:
+        logger.error(f"Error in summary endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'An error occurred: {str(e)}'
@@ -138,11 +171,9 @@ def get_languages_endpoint():
     try:
         data = request.json
         
-        # Accept either 'video_id' or 'url'
         video_id = data.get('video_id')
         url = data.get('url', '')
         
-        # If video_id not provided, try extracting from URL
         if not video_id:
             video_id = extract_video_id(url)
         
@@ -152,7 +183,11 @@ def get_languages_endpoint():
                 'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
         
-        languages_result = get_available_languages(video_id)
+        languages_result = get_available_languages(
+            video_id,
+            use_cookies=True,
+            cookie_file=os.getenv('COOKIE_FILE', 'utils/cookies.txt')
+        )
         
         if not languages_result['success']:
             return jsonify(languages_result), 400
@@ -160,6 +195,7 @@ def get_languages_endpoint():
         return jsonify(languages_result)
     
     except Exception as e:
+        logger.error(f"Error in languages endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'success': False,
             'error': f'An error occurred: {str(e)}'
@@ -174,7 +210,18 @@ def add_header(response):
     response.headers['Expires'] = '0'
     return response
 
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({'success': False, 'error': 'Endpoint not found'}), 404
+
+@app.errorhandler(500)
+def internal_error(e):
+    logger.error(f"Internal server error: {str(e)}", exc_info=True)
+    return jsonify({'success': False, 'error': 'Internal server error'}), 500
+
 if __name__ == '__main__':
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    
+    logger.info(f"Starting Flask app on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=debug)

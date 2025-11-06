@@ -1,8 +1,12 @@
 [phases.setup]
-nixPkgs = ["python310", "gcc"]
+nixPkgs = ["python310", "gcc", "gfortran", "lapack", "openblas", "pkg-config"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt && python -m nltk.downloader punkt stopwords"]
+cmds = [
+  "pip install --no-cache-dir numpy",
+  "pip install -r requirements.txt",
+  "python -m nltk.downloader punkt punkt_tab stopwords"
+]
 
 [start]
 cmd = "gunicorn app:app --bind 0.0.0.0:$PORT"

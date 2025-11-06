@@ -58,7 +58,7 @@ def get_transcript_endpoint():
         
         logger.info(f"Fetching transcript for video: {video_id}")
         
-        # Get transcript with cookie support
+        # Get transcript with cookie support from environment variable
         transcript_result = get_transcript(
             video_id, 
             language,
@@ -168,6 +168,10 @@ def get_summary_endpoint():
 
 @app.route('/api/languages', methods=['POST'])
 def get_languages_endpoint():
+    """
+    Get available languages for a video
+    No proxy or cookies needed - simple API call
+    """
     try:
         data = request.json
         
@@ -183,11 +187,8 @@ def get_languages_endpoint():
                 'error': 'Please provide a valid video_id or YouTube URL'
             }), 400
         
-        languages_result = get_available_languages(
-            video_id,
-            use_cookies=True,
-            cookie_file=os.getenv('COOKIE_FILE', 'utils/cookies.txt')
-        )
+        # Simplified call - no proxy or cookies
+        languages_result = get_available_languages(video_id)
         
         if not languages_result['success']:
             return jsonify(languages_result), 400

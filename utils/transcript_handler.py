@@ -57,10 +57,23 @@ logger = setup_logger()
 # ======================================================
 # COOKIE MANAGEMENT WITH ENVIRONMENT VARIABLE SUPPORT
 # ======================================================
-def ensure_cookies_from_env(cookie_file='utils/cookies.txt'):
+def get_cookies_from_env():
+    """
+    Get cookies content from environment variable
+    Returns the cookie content as string or None
+    """
+    cookie_content = os.environ.get('YOUTUBE_COOKIES')
+    
+    if cookie_content:
+        logger.info("Found YOUTUBE_COOKIES environment variable")
+        return cookie_content
+    
+    logger.warning("No YOUTUBE_COOKIES environment variable found")
+    return None
+
+def create_cookie_file_from_env(cookie_file='utils/cookies.txt'):
     """
     Create cookies.txt from environment variable if it doesn't exist
-    This is useful for Railway deployment where files aren't committed to git
     """
     cookie_path = Path(cookie_file)
     
@@ -70,7 +83,7 @@ def ensure_cookies_from_env(cookie_file='utils/cookies.txt'):
         return True
     
     # Try to create from environment variable
-    cookie_content = os.environ.get('YOUTUBE_COOKIES_CONTENT')
+    cookie_content = get_cookies_from_env()
     if cookie_content:
         logger.info("Creating cookies.txt from environment variable")
         try:
@@ -87,37 +100,37 @@ def ensure_cookies_from_env(cookie_file='utils/cookies.txt'):
             logger.error(f"Failed to create cookies.txt: {str(e)}")
             return False
     
-    logger.warning("No cookie file found and no YOUTUBE_COOKIES_CONTENT environment variable set")
+    logger.info("No cookies configured - proceeding without authentication")
     return False
 
 class CookieManager:
-    """Manages cookies from Netscape format cookie file"""
+    """Manages cookies from environment variable or file"""
     
     def __init__(self, cookie_file='utils/cookies.txt'):
         self.cookie_file = Path(cookie_file)
         self.cookie_jar = None
         self.session = None
-        logger.info(f"Initializing CookieManager with file: {self.cookie_file}")
+        logger.info(f"Initializing CookieManager")
         
     def load_cookies(self):
-        """Load cookies from Netscape format file"""
+        """Load cookies from environment variable or file"""
         try:
-            # First ensure cookies exist (from file or env var)
-            ensure_cookies_from_env(str(self.cookie_file))
+            # First try to create from environment variable
+            create_cookie_file_from_env(str(self.cookie_file))
             
             if not self.cookie_file.exists():
-                logger.warning(f"Cookie file not found: {self.cookie_file}")
+                logger.info("No cookie file available - skipping cookie authentication")
                 return False
             
             self.cookie_jar = MozillaCookieJar(str(self.cookie_file))
             self.cookie_jar.load(ignore_discard=True, ignore_expires=True)
             
             cookie_count = len(self.cookie_jar)
-            logger.info(f"Successfully loaded {cookie_count} cookies from {self.cookie_file}")
+            logger.info(f"Successfully loaded {cookie_count} cookies")
             
             # Log cookie details in debug mode
             for cookie in self.cookie_jar:
-                logger.debug(f"Cookie: {cookie.name} | Domain: {cookie.domain} | Expires: {cookie.expires}")
+                logger.debug(f"Cookie: {cookie.name} | Domain: {cookie.domain}")
             
             return True
             
@@ -132,7 +145,7 @@ class CookieManager:
             self.session.cookies = self.cookie_jar
             logger.info("Created session with cookies")
         else:
-            logger.warning("Creating session without cookies (no cookies loaded)")
+            logger.info("Created session without cookies")
         return self.session
     
     def get_session(self):
@@ -169,27 +182,31 @@ def extract_video_id(url):
     return None
 
 # ======================================================
-# PROXY MANAGEMENT
+# PROXY MANAGEMENT - USING ENVIRONMENT VARIABLES
 # ======================================================
-PROXY_LIST = [
-    "142.111.48.253:7030:demsanuy:5aek3a4qn27i",
-    "31.59.20.176:6754:demsanuy:5aek3a4qn27i",
-    "23.95.150.145:6114:demsanuy:5aek3a4qn27i",
-    "198.23.239.134:6540:demsanuy:5aek3a4qn27i",
-    "45.38.107.97:6014:demsanuy:5aek3a4qn27i",
-    "107.172.163.27:6543:demsanuy:5aek3a4qn27i",
-    "64.137.96.74:6641:demsanuy:5aek3a4qn27i",
-    "216.10.27.159:6837:demsanuy:5aek3a4qn27i",
-    "142.111.67.146:5611:demsanuy:5aek3a4qn27i",
-    "142.147.128.93:6593:demsanuy:5aek3a4qn27i",
-]
+def load_proxies_from_env():
+    """
+    Load proxy list from environment variable
+    Format: PROXY_LIST=ip:port:user:pass,ip:port:user:pass,ip:port:user:pass
+    """
+    proxy_env = os.environ.get('PROXY_LIST', '')
+    
+    if not proxy_env:
+        logger.warning("No PROXY_LIST environment variable found. Proxies disabled.")
+        return []
+    
+    # Split by comma and strip whitespace
+    proxy_strings = [p.strip() for p in proxy_env.split(',') if p.strip()]
+    
+    logger.info(f"Loaded {len(proxy_strings)} proxies from environment variable")
+    return proxy_strings
 
 def format_proxy(proxy_string):
     """
     Convert proxy string from 'ip:port:username:password' format
     to dictionary format required by requests library
     """
-    logger.debug(f"Formatting proxy: {proxy_string}")
+    logger.debug(f"Formatting proxy")
     
     parts = proxy_string.split(':')
     if len(parts) == 4:
@@ -202,12 +219,18 @@ def format_proxy(proxy_string):
         logger.debug(f"Formatted proxy: {ip}:{port}")
         return proxy_dict
     
-    logger.warning(f"Invalid proxy format: {proxy_string}")
+    logger.warning(f"Invalid proxy format")
     return None
 
 def get_random_proxy():
-    """Get a random proxy from the list"""
-    proxy_string = random.choice(PROXY_LIST)
+    """Get a random proxy from environment variable list"""
+    proxy_list = load_proxies_from_env()
+    
+    if not proxy_list:
+        logger.warning("No proxies available")
+        return None
+    
+    proxy_string = random.choice(proxy_list)
     logger.debug(f"Selected random proxy from list")
     return format_proxy(proxy_string)
 
@@ -240,7 +263,7 @@ def get_transcript(video_id, language=None, use_proxy=True, proxy_string=None,
         cookie_manager = CookieManager(cookie_file)
         cookies_loaded = cookie_manager.load_cookies()
         if not cookies_loaded:
-            logger.warning("Proceeding without cookies")
+            logger.info("Proceeding without cookies")
     
     last_error = None
     
@@ -256,7 +279,10 @@ def get_transcript(video_id, language=None, use_proxy=True, proxy_string=None,
                     logger.info(f"Using specified proxy")
                 else:
                     proxies = get_random_proxy()
-                    logger.info(f"Using random proxy")
+                    if proxies:
+                        logger.info(f"Using random proxy")
+                    else:
+                        logger.warning("No proxy available, proceeding without proxy")
                 
                 if proxies:
                     proxy_display = list(proxies.values())[0].split('@')[1] if '@' in list(proxies.values())[0] else 'configured'
@@ -398,64 +424,36 @@ def get_transcript(video_id, language=None, use_proxy=True, proxy_string=None,
     }
 
 # ======================================================
-# LANGUAGE LIST
+# LANGUAGE LIST - WITHOUT PROXY OR COOKIES
 # ======================================================
-def get_available_languages(video_id, use_proxy=True, cookie_file='utils/cookies.txt', use_cookies=True):
-    """Get available transcript languages with cookie support"""
+def get_available_languages(video_id):
+    """
+    Get available transcript languages (no proxy or cookies needed)
+    This is a simple API call that doesn't require authentication
+    """
     logger.info(f"Fetching available languages for video: {video_id}")
     
     try:
-        # Initialize cookie manager if needed
-        cookie_manager = None
-        if use_cookies:
-            cookie_manager = CookieManager(cookie_file)
-            cookie_manager.load_cookies()
+        api = YouTubeTranscriptApi()
+        transcript_list = api.list(video_id)
         
-        proxies = None
-        if use_proxy:
-            proxies = get_random_proxy()
-            if proxies:
-                proxy_display = list(proxies.values())[0].split('@')[1] if '@' in list(proxies.values())[0] else 'configured'
-                logger.info(f"Using proxy: {proxy_display}")
+        languages = []
+        for transcript in transcript_list:
+            languages.append({
+                'code': transcript.language_code,
+                'name': transcript.language,
+                'is_generated': transcript.is_generated,
+                'is_translatable': transcript.is_translatable
+            })
         
-        # Patch requests.get to use proxy and cookies
-        original_get = requests.get
+        logger.info(f"Found {len(languages)} available languages")
+        for lang in languages:
+            logger.debug(f"  - {lang['code']}: {lang['name']} (Generated: {lang['is_generated']})")
         
-        def proxied_get(url, **kwargs):
-            if proxies:
-                kwargs['proxies'] = proxies
-                kwargs['timeout'] = 10
-            
-            # Add cookies if available
-            if use_cookies and cookie_manager and cookie_manager.cookie_jar:
-                session = cookie_manager.get_session()
-                logger.debug(f"Using cookies for language list request")
-                return session.get(url, **kwargs)
-            
-            return original_get(url, **kwargs)
-        
-        # Monkey patch requests.get
-        with patch('requests.get', side_effect=proxied_get):
-            api = YouTubeTranscriptApi()
-            transcript_list = api.list(video_id)
-            
-            languages = []
-            for transcript in transcript_list:
-                languages.append({
-                    'code': transcript.language_code,
-                    'name': transcript.language,
-                    'is_generated': transcript.is_generated,
-                    'is_translatable': transcript.is_translatable
-                })
-            
-            logger.info(f"Found {len(languages)} available languages")
-            for lang in languages:
-                logger.debug(f"  - {lang['code']}: {lang['name']} (Generated: {lang['is_generated']})")
-            
-            return {
-                'success': True,
-                'languages': languages
-            }
+        return {
+            'success': True,
+            'languages': languages
+        }
     
     except Exception as e:
         logger.error(f"Error fetching languages: {str(e)}", exc_info=True)

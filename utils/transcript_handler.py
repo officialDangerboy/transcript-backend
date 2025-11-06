@@ -1,6 +1,7 @@
 import re
 import random
 import logging
+import os
 from pathlib import Path
 from http.cookiejar import MozillaCookieJar
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -54,8 +55,41 @@ def setup_logger(name='yt_transcript', level=logging.DEBUG, log_file=None):
 logger = setup_logger()
 
 # ======================================================
-# COOKIE MANAGEMENT
+# COOKIE MANAGEMENT WITH ENVIRONMENT VARIABLE SUPPORT
 # ======================================================
+def ensure_cookies_from_env(cookie_file='utils/cookies.txt'):
+    """
+    Create cookies.txt from environment variable if it doesn't exist
+    This is useful for Railway deployment where files aren't committed to git
+    """
+    cookie_path = Path(cookie_file)
+    
+    # If file already exists, use it
+    if cookie_path.exists():
+        logger.info(f"Cookie file found at: {cookie_path}")
+        return True
+    
+    # Try to create from environment variable
+    cookie_content = os.environ.get('YOUTUBE_COOKIES_CONTENT')
+    if cookie_content:
+        logger.info("Creating cookies.txt from environment variable")
+        try:
+            # Create directory if it doesn't exist
+            cookie_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Write cookie content
+            with open(cookie_path, 'w', encoding='utf-8') as f:
+                f.write(cookie_content)
+            
+            logger.info(f"✓ Successfully created cookies.txt at: {cookie_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create cookies.txt: {str(e)}")
+            return False
+    
+    logger.warning("No cookie file found and no YOUTUBE_COOKIES_CONTENT environment variable set")
+    return False
+
 class CookieManager:
     """Manages cookies from Netscape format cookie file"""
     
@@ -68,6 +102,9 @@ class CookieManager:
     def load_cookies(self):
         """Load cookies from Netscape format file"""
         try:
+            # First ensure cookies exist (from file or env var)
+            ensure_cookies_from_env(str(self.cookie_file))
+            
             if not self.cookie_file.exists():
                 logger.warning(f"Cookie file not found: {self.cookie_file}")
                 return False
@@ -178,7 +215,7 @@ def get_random_proxy():
 # FETCH TRANSCRIPT WITH COOKIES
 # ======================================================
 def get_transcript(video_id, language=None, use_proxy=True, proxy_string=None, 
-                   max_retries=3, cookie_file=r'C:\Users\Lenovo\Desktop\React\ClientBooker\ClientBooker\utils\cookies.txt', use_cookies=True):
+                   max_retries=3, cookie_file='utils/cookies.txt', use_cookies=True):
     """
     Fetches transcript with auto language detection, proxy support, and cookies
     
@@ -188,7 +225,7 @@ def get_transcript(video_id, language=None, use_proxy=True, proxy_string=None,
         use_proxy: Whether to use proxy (default: True)
         proxy_string: Specific proxy to use (format: ip:port:username:password)
         max_retries: Maximum number of retries with different proxies
-        cookie_file: Path to Netscape format cookie file
+        cookie_file: Path to Netscape format cookie file (default: 'utils/cookies.txt')
         use_cookies: Whether to use cookies (default: True)
     
     Returns:

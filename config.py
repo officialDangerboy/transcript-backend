@@ -1,1 +1,0 @@
-USE_COOKIES = True

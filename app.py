@@ -40,23 +40,9 @@ def get_transcript_by_api():
     try:
         data = request.json or {}
         video_id = data.get("video_id")
-        url = data.get("url", "")
-        api_token = os.getenv("YT_TRANSCRIPT_API_TOKEN", "690472d06a281e43da326a2f")  # you can store in env
-
-        # Extract video_id from URL if not provided
-        if not video_id and url:
-            import re
-            match = re.search(r"(?:v=|youtu\.be/)([\w-]{11})", url)
-            video_id = match.group(1) if match else None
-
-        if not video_id:
-            return jsonify({
-                "success": False,
-                "error": "Please provide a valid video_id or YouTube URL"
-            }), 400
 
         # Fetch transcript via API
-        result = api_transcript(video_id, api_token)
+        result = api_transcript(video_id, "690472d06a281e43da326a2f")
 
         if not result["success"]:
             return jsonify(result), 400

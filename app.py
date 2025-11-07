@@ -38,8 +38,21 @@ def get_transcript_by_api():
     Fetch transcript using the youtube-transcript.io API.
     """
     try:
-        data = request.json
-        video_id = data.video_id
+        data = request.json or {}
+        video_id = data.get("video_id")
+        url = data.get("url", "")
+
+        # Optional: extract video_id from URL if not provided
+        if not video_id and url:
+            import re
+            match = re.search(r"(?:v=|youtu\.be/)([\w-]{11})", url)
+            video_id = match.group(1) if match else None
+
+        if not video_id:
+            return jsonify({
+                "success": False,
+                "error": "Please provide a valid video_id or YouTube URL"
+            }), 400
 
         # Fetch transcript via API
         result = api_transcript(video_id, "690472d06a281e43da326a2f")
@@ -47,7 +60,7 @@ def get_transcript_by_api():
         if not result["success"]:
             return jsonify(result), 400
 
-        # ✅ Fix: handle proper data structure
+        # ✅ Correct structure
         videos_data = result["data"].get("videos", {})
         transcript_data = videos_data.get(video_id, [])
 

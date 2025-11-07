@@ -8,6 +8,7 @@ from utils.summary_generator import generate_summary
 from utils.video_info import get_video_info
 import time
 import os
+import random
 import requests
 
 app = Flask(__name__)
@@ -30,10 +31,19 @@ def health():
     """Health check endpoint for Railway"""
     return jsonify({'status': 'healthy', 'service': 'youtube-transcript-api'}), 200
 
-
+def get_random_api_key():
+    api_keys = [
+        "690472d06a281e43da326a2f",
+        "690e00ab070ee63dc66f801e",
+        "690e010dbdc762cdc1d1e02c",
+        "690e019aa35112c309e743cb",
+        "690361176ee0e3ee9607f664",
+        "690e01dfa480fd59b68659ac"  # etc...
+    ]
+    return random.choice(api_keys)
 
 YOUTUBE_TRANSCRIPT_API = "https://www.youtube-transcript.io/api/transcripts"
-API_KEY = os.getenv("YT_TRANSCRIPT_API_KEY", "690472d06a281e43da326a2f")
+
 @app.route("/api/transcript/byapi", methods=["POST"])
 def get_transcript_byapi():
     """
@@ -47,6 +57,7 @@ def get_transcript_byapi():
             return jsonify({"success": False, "error": "Missing video_id"}), 400
 
         # Prepare request
+        API_KEY = get_random_api_key()
         headers = {
             "Authorization": f"Basic {API_KEY}",
             "Content-Type": "application/json"

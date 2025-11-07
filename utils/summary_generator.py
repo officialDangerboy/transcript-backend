@@ -1,61 +1,168 @@
-import nltk
-from sumy.parsers.plaintext import PlaintextParser
-from sumy.nlp.tokenizers import Tokenizer
-from sumy.summarizers.lex_rank import LexRankSummarizer
-from sumy.nlp.stemmers import Stemmer
-from sumy.utils import get_stop_words
+"""
+Railway-Optimized AI Summary Generator
+Uses Hugging Face Inference API (FREE) - No local models needed!
+Get your free token at: https://huggingface.co/settings/tokens
+"""
+
+import os
 import re
+import requests
+import time
+from typing import Dict
 
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
-    nltk.download('punkt_tab')
-
-def clean_text(text):
-    text = re.sub(r'\[.*?\]', '', text)
-    text = re.sub(r'\s+', ' ', text)
+# ======================================================
+# HELPER FUNCTIONS
+# ======================================================
+def clean_text(text: str) -> str:
+    """Clean transcript text"""
+    text = re.sub(r'\[.*?\]', '', text)  # Remove timestamps
+    text = re.sub(r'\s+', ' ', text)     # Normalize whitespace
     text = text.strip()
     return text
 
-def generate_summary(transcript_text, length='medium'):
+# ======================================================
+# MAIN SUMMARIZATION FUNCTION
+# ======================================================
+def generate_summary(transcript_text: str, length='medium') -> Dict:
+    
+    # Get API token from environment
+    api_token = os.environ.get('HF_API_TOKEN')
+    
+    if not api_token:
+        return {
+            'success': False,
+            'error': 'HF_API_TOKEN not set. Get free token from https://huggingface.co/settings/tokens'
+        }
+    
     try:
+        # Clean the input text
         cleaned_text = clean_text(transcript_text)
         
-        if not cleaned_text:
+        if not cleaned_text or len(cleaned_text) < 50:
             return {
                 'success': False,
-                'error': 'No text available to summarize'
+                'error': 'Text too short to summarize'
             }
         
-        sentence_counts = {
-            'short': 5,
-            'medium': 10,
-            'detailed': 20
+        # Use BART model - it's free on HF Inference API
+        model_id = "facebook/bart-large-cnn"
+        api_url = f"https://router.huggingface.co/hf-inference/models/${model_id}"
+        
+        headers = {
+            "Authorization": f"Bearer {api_token}",
+            "Content-Type": "application/json"
         }
         
-        sentence_count = sentence_counts.get(length, 10)
+        # Configure length parameters based on user preference
+        length_configs = {
+            'short': {
+                'max_length': 130,
+                'min_length': 30,
+                'chunk_size': 800
+            },
+            'medium': {
+                'max_length': 250,
+                'min_length': 100,
+                'chunk_size': 1000
+            },
+            'detailed': {
+                'max_length': 400,
+                'min_length': 200,
+                'chunk_size': 1200
+            }
+        }
         
-        parser = PlaintextParser.from_string(cleaned_text, Tokenizer("english"))
-        stemmer = Stemmer("english")
-        summarizer = LexRankSummarizer(stemmer)
-        summarizer.stop_words = get_stop_words("english")
+        config = length_configs.get(length, length_configs['medium'])
         
-        summary_sentences = summarizer(parser.document, sentence_count)
+        # Split text into chunks (BART has ~1024 token limit)
+        words = cleaned_text.split()
+        chunk_size = config['chunk_size']
+        chunks = [' '.join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
         
-        summary_text = ' '.join([str(sentence) for sentence in summary_sentences])
+        summaries = []
         
-        word_count = len(summary_text.split())
+        for chunk_idx, chunk in enumerate(chunks):
+            if len(chunk.split()) < 40:  # Skip tiny chunks
+                continue
+            
+            # Prepare payload
+            payload = {
+                "inputs": chunk,
+                "parameters": {
+                    "max_length": config['max_length'],
+                    "min_length": config['min_length'],
+                    "do_sample": False,
+                    "early_stopping": True
+                }
+            }
+            
+            # Try up to 3 times (for model loading)
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = requests.post(
+                        api_url,
+                        headers=headers,
+                        json=payload,
+                        timeout=30
+                    )
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        
+                        # Extract summary text
+                        if isinstance(result, list) and len(result) > 0:
+                            summary_text = result[0].get('summary_text', '')
+                            if summary_text:
+                                summaries.append(summary_text)
+                        break
+                        
+                    elif response.status_code == 503:
+                        # Model is loading, wait and retry
+                        if attempt < max_retries - 1:
+                            time.sleep(3)
+                            continue
+                        else:
+                            raise Exception("Model loading timeout. Please try again in a moment.")
+                    
+                    elif response.status_code == 429:
+                        # Rate limited
+                        raise Exception("Rate limit reached. Please try again in a minute.")
+                    
+                    else:
+                        error_msg = response.json().get('error', response.text)
+                        raise Exception(f"API error: {error_msg}")
+                
+                except requests.exceptions.Timeout:
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                        continue
+                    else:
+                        raise Exception("Request timeout. Please try again.")
+                
+                except requests.exceptions.RequestException as e:
+                    raise Exception(f"Network error: {str(e)}")
         
-        reading_time = max(1, word_count // 200)
+        # Combine all chunk summaries
+        if not summaries:
+            return {
+                'success': False,
+                'error': 'Failed to generate summary. Please try again.'
+            }
+        
+        final_summary = ' '.join(summaries)
+        
+        # Calculate metadata
+        word_count = len(final_summary.split())
+        reading_time = max(1, word_count // 200)  # Assuming 200 words per minute
         
         return {
             'success': True,
-            'summary': summary_text,
+            'summary': final_summary,
             'word_count': word_count,
             'reading_time': reading_time,
-            'length': length
+            'length': length,
+            'method': 'huggingface_api'
         }
     
     except Exception as e:

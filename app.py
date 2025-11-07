@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from utils.transcript_handler import (
     extract_video_id, get_transcript, get_available_languages,
-    format_transcript_with_timestamps, format_transcript_plain
+    format_transcript_with_timestamps, format_transcript_plain,api_transcript
 )
 from utils.summary_generator import generate_summary
 from utils.video_info import get_video_info
@@ -28,6 +28,69 @@ def index():
 def health():
     """Health check endpoint for Railway"""
     return jsonify({'status': 'healthy', 'service': 'youtube-transcript-api'}), 200
+
+
+
+
+@app.route('/api/transcript/byapi', methods=['POST'])
+def get_transcript_by_api():
+    """
+    Fetch transcript using the youtube-transcript.io API.
+    """
+    try:
+        data = request.json or {}
+        video_id = data.get("video_id")
+        url = data.get("url", "")
+        api_token = os.getenv("YT_TRANSCRIPT_API_TOKEN", "690472d06a281e43da326a2f")  # you can store in env
+
+        # Extract video_id from URL if not provided
+        if not video_id and url:
+            import re
+            match = re.search(r"(?:v=|youtu\.be/)([\w-]{11})", url)
+            video_id = match.group(1) if match else None
+
+        if not video_id:
+            return jsonify({
+                "success": False,
+                "error": "Please provide a valid video_id or YouTube URL"
+            }), 400
+
+        # Fetch transcript via API
+        result = api_transcript(video_id, api_token)
+
+        if not result["success"]:
+            return jsonify(result), 400
+
+        # ✅ Fix: handle proper data structure
+        videos_data = result["data"].get("videos", {})
+        transcript_data = videos_data.get(video_id, [])
+
+        if not transcript_data:
+            return jsonify({
+                "success": False,
+                "error": "Transcript not found or empty for this video."
+            }), 404
+
+        # Join all segments into plain text
+        transcript_text = " ".join(seg.get("text", "") for seg in transcript_data)
+
+        return jsonify({
+            "success": True,
+            "video_id": video_id,
+            "transcript_segments": transcript_data,
+            "plain_text": transcript_text,
+            "word_count": len(transcript_text.split()),
+            "char_count": len(transcript_text),
+            "source": "youtube-transcript.io API"
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Server error: {str(e)}"
+        }), 500
+
+    
 
 @app.route('/api/transcript', methods=['POST'])
 def get_transcript_endpoint():

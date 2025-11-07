@@ -156,6 +156,58 @@ def get_random_proxy():
 # ======================================================
 # FETCH TRANSCRIPT WITH COOKIES
 # ======================================================
+
+
+
+def api_transcript(video_id: str, api_token: str) -> dict:
+    """
+    Fetch transcript from YouTube Transcript API.
+    
+    Args:
+        video_id (str): YouTube video ID (e.g., 'jNQXAC9IVRw')
+        api_token (str): Your API token for authentication
+    
+    Returns:
+        dict: {
+            'success': True/False,
+            'data': <transcript data if success>,
+            'error': <error message if failed>
+        }
+    """
+    url = "https://www.youtube-transcript.io/api/transcripts"
+    headers = {
+        "Authorization": f"Basic {api_token}",
+        "Content-Type": "application/json"
+    }
+    payload = {"ids": [video_id]}
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+
+        # Handle common HTTP errors
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "success": True,
+                "data": data
+            }
+
+        elif response.status_code == 401:
+            return {"success": False, "error": "Unauthorized – check your API token."}
+        elif response.status_code == 404:
+            return {"success": False, "error": "Transcript not found for this video ID."}
+        else:
+            return {
+                "success": False,
+                "error": f"API returned status {response.status_code}: {response.text}"
+            }
+
+    except requests.exceptions.Timeout:
+        return {"success": False, "error": "Request timed out."}
+    except requests.exceptions.RequestException as e:
+        return {"success": False, "error": str(e)}
+
+
 def get_transcript(video_id, language=None, use_proxy=True, proxy_string=None, 
                    max_retries=3, cookie_file='utils/cookies.txt', use_cookies=True):
     """

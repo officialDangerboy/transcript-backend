@@ -8,6 +8,7 @@ from utils.summary_generator import generate_summary
 from utils.video_info import get_video_info
 import time
 import os
+import requests
 
 app = Flask(__name__)
 
@@ -31,57 +32,78 @@ def health():
 
 
 
-
-@app.route('/api/transcript/byapi', methods=['POST'])
-def get_transcript_by_api():
+YOUTUBE_TRANSCRIPT_API = "https://www.youtube-transcript.io/api/transcripts"
+API_KEY = os.getenv("YT_TRANSCRIPT_API_KEY", "690472d06a281e43da326a2f")
+@app.route("/api/transcript/byapi", methods=["POST"])
+def get_transcript_byapi():
     """
-    Fetch transcript using the youtube-transcript.io API.
+    Fetch transcript & video details using youtube-transcript.io API.
     """
     try:
         data = request.json or {}
         video_id = data.get("video_id")
-        url = data.get("url", "")
-
-        # Optional: extract video_id from URL if not provided
-        if not video_id and url:
-            import re
-            match = re.search(r"(?:v=|youtu\.be/)([\w-]{11})", url)
-            video_id = match.group(1) if match else None
-
+        language = data.get("language")  # optional
         if not video_id:
+            return jsonify({"success": False, "error": "Missing video_id"}), 400
+
+        # Prepare request
+        headers = {
+            "Authorization": f"Basic {API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {"ids": [video_id]}
+
+        # Call external API
+        response = requests.post(YOUTUBE_TRANSCRIPT_API, headers=headers, json=payload)
+        if response.status_code != 200:
             return jsonify({
                 "success": False,
-                "error": "Please provide a valid video_id or YouTube URL"
-            }), 400
+                "error": f"Upstream API returned {response.status_code}",
+                "details": response.text
+            }), response.status_code
 
-        # Fetch transcript via API
-        result = api_transcript(video_id, "690472d06a281e43da326a2f")
+        data_list = response.json()
+        if not isinstance(data_list, list) or len(data_list) == 0:
+            return jsonify({"success": False, "error": "Unexpected API response"}), 500
 
-        if not result["success"]:
-            return jsonify(result), 400
+        video_data = data_list[0]
+        microformat = video_data.get("microformat", {}).get("playerMicroformatRenderer", {})
+        tracks = video_data.get("tracks", [])
+        selected_track = None
 
-        # ✅ Correct structure
-        videos_data = result["data"].get("videos", {})
-        transcript_data = videos_data.get(video_id, [])
+        # Select preferred language
+        if language:
+            for t in tracks:
+                if t.get("language", "").lower() == language.lower():
+                    selected_track = t
+                    break
+        if not selected_track and tracks:
+            selected_track = tracks[0]
 
-        if not transcript_data:
-            return jsonify({
-                "success": False,
-                "error": "Transcript not found or empty for this video."
-            }), 404
+        transcript_segments = selected_track.get("transcript", []) if selected_track else []
+        transcript_text = " ".join(seg.get("text", "") for seg in transcript_segments)
 
-        # Join all segments into plain text
-        transcript_text = " ".join(seg.get("text", "") for seg in transcript_data)
-
-        return jsonify({
+        # Build clean response
+        result = {
             "success": True,
             "video_id": video_id,
-            "transcript_segments": transcript_data,
+            "title": microformat.get("title", {}).get("simpleText"),
+            "author": video_data.get("author"),
+            "channel_id": video_data.get("channelId"),
+            "thumbnail": microformat.get("thumbnail", {}).get("thumbnails", [{}])[0].get("url"),
+            "description": microformat.get("description", {}).get("simpleText"),
+            "language": selected_track.get("language") if selected_track else None,
+            "transcript_segments": transcript_segments,
             "plain_text": transcript_text,
             "word_count": len(transcript_text.split()),
             "char_count": len(transcript_text),
-            "source": "youtube-transcript.io API"
-        })
+            "view_count": microformat.get("viewCount"),
+            "publish_date": microformat.get("publishDate"),
+            "like_count": microformat.get("likeCount"),
+            "source": "youtube-transcript.io"
+        }
+
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({

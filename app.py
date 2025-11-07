@@ -38,8 +38,8 @@ def get_transcript_by_api():
     Fetch transcript using the youtube-transcript.io API.
     """
     try:
-        data = request.json or {}
-        video_id = data.get("video_id")
+        data = request.json
+        video_id = data.video_id
 
         # Fetch transcript via API
         result = api_transcript(video_id, "690472d06a281e43da326a2f")

@@ -62,79 +62,117 @@ def fetch_transcript(video_id: str) -> Dict:
 # CLEAN & COMPRESS TRANSCRIPT
 # ======================================================
 def clean_segments(segments: List[Dict]) -> List[Dict]:
-    """
-    Clean segment timestamps and text
-    """
+    """Clean and normalize segment data"""
     cleaned = []
     for seg in segments:
         text = seg.get('text', '').strip()
-        if not text:
+        if not text or len(text) < 3:  # Skip empty or too short
             continue
         
-        # Remove extra whitespace
-        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
         
         cleaned.append({
             'text': text,
             'start': round(seg.get('start', 0), 2),
+            'end': round(seg.get('start', 0) + seg.get('duration', 0), 2),
             'duration': round(seg.get('duration', 0), 2)
         })
     
     return cleaned
 
-def compress_transcript(segments: List[Dict], reduction_target: float = 0.28) -> Dict:
+
+def get_time_based_chunks(segments: List[Dict], start_seconds: float, end_seconds: float) -> List[Dict]:
+    """Extract segments within a time range"""
+    return [s for s in segments if start_seconds <= s['start'] <= end_seconds]
+
+
+def compress_transcript(segments: List[Dict]) -> Dict:
     """
-    Compress transcript by 25-30% by removing less important parts
-    Strategy: Keep beginning, middle highlights, and end; remove redundant middle
+    Smart compression: Extract key sections for coherent summary
+    - First 30 seconds (introduction)
+    - Middle 30 seconds (core content)
+    - Last 30 seconds (conclusion)
+    - Top 5% most information-dense segments from each section
+    Total: ~25% of original content
     """
-    if not segments:
-        return {'segments': [], 'full_text': ''}
+    if not segments or len(segments) == 0:
+        return {'segments': [], 'full_text': '', 'reduction_percent': 0}
     
     total_segments = len(segments)
+    video_duration = segments[-1]['end'] if segments else 0
     
-    # Calculate sections
-    keep_start = int(total_segments * 0.15)  # Keep first 15%
-    keep_end = int(total_segments * 0.15)    # Keep last 15%
+    print(f"📹 Video duration: {video_duration:.1f}s, Total segments: {total_segments}")
     
-    # Middle section: keep ~40% of important segments
-    middle_start = keep_start
-    middle_end = total_segments - keep_end
-    middle_segments = segments[middle_start:middle_end]
+    # === SECTION 1: First 30 seconds (Introduction) ===
+    intro_segments = get_time_based_chunks(segments, 0, 30)
+    # Keep top 5% most dense segments from intro
+    intro_keep = max(1, int(len(intro_segments) * 0.05)) if intro_segments else 0
+    intro_top = sorted(intro_segments, key=lambda s: len(s['text'].split()), reverse=True)[:intro_keep]
     
-    # Filter middle: keep segments with more words (likely more important)
-    middle_important = sorted(
-        middle_segments,
-        key=lambda s: len(s['text'].split()),
-        reverse=True
-    )[:int(len(middle_segments) * 0.4)]
+    # === SECTION 2: Middle 30 seconds (Core content) ===
+    middle_start = (video_duration / 2) - 15  # 15s before middle
+    middle_end = (video_duration / 2) + 15    # 15s after middle
+    middle_segments = get_time_based_chunks(segments, middle_start, middle_end)
+    # Keep top 5% most dense segments from middle
+    middle_keep = max(1, int(len(middle_segments) * 0.05)) if middle_segments else 0
+    middle_top = sorted(middle_segments, key=lambda s: len(s['text'].split()), reverse=True)[:middle_keep]
     
-    # Sort by timestamp to maintain order
-    middle_important = sorted(middle_important, key=lambda s: s['start'])
+    # === SECTION 3: Last 30 seconds (Conclusion) ===
+    outro_start = max(0, video_duration - 30)
+    outro_segments = get_time_based_chunks(segments, outro_start, video_duration)
+    # Keep top 5% most dense segments from outro
+    outro_keep = max(1, int(len(outro_segments) * 0.05)) if outro_segments else 0
+    outro_top = sorted(outro_segments, key=lambda s: len(s['text'].split()), reverse=True)[:outro_keep]
     
-    # Combine: start + important middle + end
-    compressed = (
-        segments[:keep_start] +
-        middle_important +
-        segments[-keep_end:] if keep_end > 0 else []
-    )
+    # === SECTION 4: Additional key segments from entire video ===
+    # Get top 10% most information-dense segments from everywhere
+    all_dense = sorted(segments, key=lambda s: len(s['text'].split()), reverse=True)
+    additional_keep = int(total_segments * 0.10)  # 10% additional
+    additional_segments = all_dense[:additional_keep]
     
-    # Sort by start time
-    compressed = sorted(compressed, key=lambda s: s['start'])
+    # === COMBINE & DEDUPLICATE ===
+    combined = intro_top + middle_top + outro_top + additional_segments
+    # Remove duplicates by segment start time
+    seen_times = set()
+    unique_segments = []
+    for seg in combined:
+        if seg['start'] not in seen_times:
+            seen_times.add(seg['start'])
+            unique_segments.append(seg)
     
-    # Calculate compression stats
+    # Sort by timestamp to maintain flow
+    compressed = sorted(unique_segments, key=lambda s: s['start'])
+    
+    # Build full text with smooth transitions
+    text_parts = []
+    for i, seg in enumerate(compressed):
+        text_parts.append(seg['text'])
+        # Add transition marker if there's a big time gap (>10s)
+        if i < len(compressed) - 1:
+            time_gap = compressed[i + 1]['start'] - seg['end']
+            if time_gap > 10:
+                text_parts.append('[...]')  # Indicate skipped content
+    
+    compressed_text = ' '.join(text_parts)
     original_text = ' '.join(s['text'] for s in segments)
-    compressed_text = ' '.join(s['text'] for s in compressed)
     
     reduction = 1 - (len(compressed) / total_segments)
     
     print(f"📊 Compression: {total_segments} → {len(compressed)} segments ({reduction*100:.1f}% reduction)")
+    print(f"📝 Text: {len(original_text)} → {len(compressed_text)} chars")
     
     return {
         'segments': compressed,
         'full_text': compressed_text,
         'original_length': len(original_text),
         'compressed_length': len(compressed_text),
-        'reduction_percent': round(reduction * 100, 1)
+        'reduction_percent': round(reduction * 100, 1),
+        'sections': {
+            'intro': len(intro_top),
+            'middle': len(middle_top),
+            'outro': len(outro_top),
+            'additional': len(additional_segments)
+        }
     }
 
 # ======================================================

@@ -24,13 +24,15 @@ GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini
 TRANSCRIPT_API_URL = "https://vid-smart-sum.vercel.app/api/transcript/fetch"
 
 # ======================================================
-# FETCH TRANSCRIPT FROM API
+# CLEAN & COMPRESS TRANSCRIPT
 # ======================================================
 def fetch_transcript(video_id: str) -> Dict:
     """
     Fetch transcript from your external API
     """
     try:
+        print(f"📡 Calling transcript API for video: {video_id}")
+        
         response = requests.post(
             TRANSCRIPT_API_URL,
             headers={'Content-Type': 'application/json'},
@@ -38,21 +40,55 @@ def fetch_transcript(video_id: str) -> Dict:
             timeout=30
         )
         
+        print(f"📥 Response status: {response.status_code}")
+        
         if response.status_code == 200:
             data = response.json()
             if data.get('success'):
+                print(f"✅ Transcript fetched successfully (cached: {data.get('cached')})")
                 return {
                     'success': True,
                     'data': data.get('data', {}),
                     'cached': data.get('cached', False)
                 }
+            else:
+                # API returned 200 but success=false
+                return {
+                    'success': False,
+                    'error': data.get('error', 'Unknown error from transcript API')
+                }
+        
+        # Handle non-200 responses
+        try:
+            error_data = response.json()
+            error_msg = error_data.get('error', response.text)
+        except:
+            error_msg = response.text
+        
+        print(f"❌ API Error: {response.status_code} - {error_msg}")
         
         return {
             'success': False,
-            'error': f'API returned status {response.status_code}'
+            'error': f'Transcript API returned {response.status_code}: {error_msg}',
+            'status_code': response.status_code
+        }
+    
+    except requests.exceptions.Timeout:
+        print(f"⏱️ Timeout while fetching transcript")
+        return {
+            'success': False,
+            'error': 'Transcript API request timed out (30s)'
+        }
+    
+    except requests.exceptions.ConnectionError:
+        print(f"🔌 Connection error to transcript API")
+        return {
+            'success': False,
+            'error': 'Could not connect to transcript API'
         }
     
     except Exception as e:
+        print(f"💥 Unexpected error: {str(e)}")
         return {
             'success': False,
             'error': f'Failed to fetch transcript: {str(e)}'
@@ -60,6 +96,9 @@ def fetch_transcript(video_id: str) -> Dict:
 
 # ======================================================
 # CLEAN & COMPRESS TRANSCRIPT
+# ======================================================
+# ======================================================
+# CLEAN & COMPRESS TRANSCRIPT (IMPROVED)
 # ======================================================
 def clean_segments(segments: List[Dict]) -> List[Dict]:
     """Clean and normalize segment data"""
@@ -86,14 +125,14 @@ def get_time_based_chunks(segments: List[Dict], start_seconds: float, end_second
     return [s for s in segments if start_seconds <= s['start'] <= end_seconds]
 
 
-def compress_transcript(segments: List[Dict]) -> Dict:
+def compress_transcript_smart(segments: List[Dict]) -> Dict:
     """
     Smart compression: Extract key sections for coherent summary
     - First 30 seconds (introduction)
     - Middle 30 seconds (core content)
     - Last 30 seconds (conclusion)
-    - Top 5% most information-dense segments from each section
-    Total: ~25% of original content
+    - Top segments from each section
+    Total: ~25% of original content (keeping 25%, removing 75%)
     """
     if not segments or len(segments) == 0:
         return {'segments': [], 'full_text': '', 'reduction_percent': 0}
@@ -105,29 +144,29 @@ def compress_transcript(segments: List[Dict]) -> Dict:
     
     # === SECTION 1: First 30 seconds (Introduction) ===
     intro_segments = get_time_based_chunks(segments, 0, 30)
-    # Keep top 5% most dense segments from intro
-    intro_keep = max(1, int(len(intro_segments) * 0.05)) if intro_segments else 0
+    # Keep 30% of intro segments
+    intro_keep = max(1, int(len(intro_segments) * 0.30)) if intro_segments else 0
     intro_top = sorted(intro_segments, key=lambda s: len(s['text'].split()), reverse=True)[:intro_keep]
     
     # === SECTION 2: Middle 30 seconds (Core content) ===
     middle_start = (video_duration / 2) - 15  # 15s before middle
     middle_end = (video_duration / 2) + 15    # 15s after middle
     middle_segments = get_time_based_chunks(segments, middle_start, middle_end)
-    # Keep top 5% most dense segments from middle
-    middle_keep = max(1, int(len(middle_segments) * 0.05)) if middle_segments else 0
+    # Keep 30% of middle segments
+    middle_keep = max(1, int(len(middle_segments) * 0.30)) if middle_segments else 0
     middle_top = sorted(middle_segments, key=lambda s: len(s['text'].split()), reverse=True)[:middle_keep]
     
     # === SECTION 3: Last 30 seconds (Conclusion) ===
     outro_start = max(0, video_duration - 30)
     outro_segments = get_time_based_chunks(segments, outro_start, video_duration)
-    # Keep top 5% most dense segments from outro
-    outro_keep = max(1, int(len(outro_segments) * 0.05)) if outro_segments else 0
+    # Keep 30% of outro segments
+    outro_keep = max(1, int(len(outro_segments) * 0.30)) if outro_segments else 0
     outro_top = sorted(outro_segments, key=lambda s: len(s['text'].split()), reverse=True)[:outro_keep]
     
     # === SECTION 4: Additional key segments from entire video ===
-    # Get top 10% most information-dense segments from everywhere
+    # Get top 20% most information-dense segments from everywhere
     all_dense = sorted(segments, key=lambda s: len(s['text'].split()), reverse=True)
-    additional_keep = int(total_segments * 0.10)  # 10% additional
+    additional_keep = int(total_segments * 0.20)  # 20% additional
     additional_segments = all_dense[:additional_keep]
     
     # === COMBINE & DEDUPLICATE ===
@@ -199,40 +238,94 @@ def call_gemini(prompt: str, temperature: float = 0.7) -> Dict:
     
     for attempt in range(3):
         try:
+            print(f"🤖 Calling Gemini API (attempt {attempt + 1}/3)...")
+            
             response = requests.post(
                 url,
                 headers={"Content-Type": "application/json"},
                 json=payload,
-                timeout=30
+                timeout=60  # Increased timeout
             )
+            
+            print(f"📥 Gemini Response Status: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
+                
+                # Handle response structure
                 if 'candidates' in result and len(result['candidates']) > 0:
-                    content = result['candidates'][0].get('content', {})
+                    candidate = result['candidates'][0]
+                    content = candidate.get('content', {})
                     parts = content.get('parts', [])
+                    
                     if parts and 'text' in parts[0]:
+                        response_text = parts[0]['text'].strip()
+                        print(f"✅ Got response: {len(response_text)} characters")
                         return {
                             'success': True,
-                            'text': parts[0]['text'].strip()
+                            'text': response_text
                         }
+                
+                # If we reach here, response format was unexpected
+                print(f"⚠️ Unexpected response format: {result}")
+                return {
+                    'success': False,
+                    'error': 'Unexpected response format from Gemini',
+                    'details': str(result)
+                }
             
             elif response.status_code == 429:
+                print(f"⏳ Rate limited, trying another key...")
                 if attempt < 2:
                     api_key = get_random_gemini_key()
                     url = f"{GEMINI_API_URL}?key={api_key}"
                     time.sleep(2)
                     continue
+                return {
+                    'success': False,
+                    'error': 'Rate limit exceeded on all API keys'
+                }
             
-            return {'success': False, 'error': f'API error: {response.status_code}'}
+            elif response.status_code == 400:
+                error_data = response.json()
+                error_msg = error_data.get('error', {}).get('message', 'Bad request')
+                print(f"❌ Bad request: {error_msg}")
+                return {
+                    'success': False,
+                    'error': f'Gemini API error: {error_msg}'
+                }
+            
+            else:
+                print(f"❌ API error {response.status_code}: {response.text}")
+                return {
+                    'success': False,
+                    'error': f'Gemini API error: {response.status_code}'
+                }
         
-        except Exception as e:
+        except requests.exceptions.Timeout:
+            print(f"⏱️ Request timeout (attempt {attempt + 1})")
             if attempt < 2:
                 time.sleep(2)
                 continue
-            return {'success': False, 'error': str(e)}
+            return {
+                'success': False,
+                'error': 'Gemini API request timed out'
+            }
+        
+        except Exception as e:
+            print(f"💥 Error: {str(e)}")
+            if attempt < 2:
+                time.sleep(2)
+                continue
+            return {
+                'success': False,
+                'error': f'Gemini API call failed: {str(e)}'
+            }
     
-    return {'success': False, 'error': 'Max retries exceeded'}
+    return {
+        'success': False,
+        'error': 'Max retries exceeded'
+    }
 
 # ======================================================
 # SUMMARY PROMPTS
@@ -409,9 +502,9 @@ def generate_summary(video_id: str, summary_type: str = 'medium') -> Dict:
         print(f"🧹 Cleaning {len(segments)} segments...")
         cleaned_segments = clean_segments(segments)
         
-        # 3. Compress transcript (25-30%)
+        # 3. Compress transcript (smart 25% extraction)
         print(f"🗜️ Compressing transcript...")
-        compressed = compress_transcript(cleaned_segments)
+        compressed = compress_transcript_smart(cleaned_segments)
         
         # 4. Generate prompt
         prompt = get_summary_prompt(

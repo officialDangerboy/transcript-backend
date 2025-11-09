@@ -20,7 +20,7 @@ def get_random_gemini_key():
     ]
     return random.choice(api_keys)
 
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:streamGenerateContent"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
 TRANSCRIPT_API_URL = "https://vid-smart-sum.vercel.app/api/transcript/fetch"
 
 # ======================================================

@@ -38,6 +38,7 @@ def get_random_api_key():
         "690e010dbdc762cdc1d1e02c",
         "690e019aa35112c309e743cb",
         "690361176ee0e3ee9607f664",
+        "690e253bdc96d99ec19b7790",
         "690e01dfa480fd59b68659ac"  # etc...
     ]
     return random.choice(api_keys)
@@ -185,61 +186,84 @@ def get_transcript_endpoint():
             'error': f'An error occurred: {str(e)}'
         }), 500
 
-@app.route('/api/summary', methods=['POST'])
-def get_summary_endpoint():
+
+@app.route('/api/summary/detailed', methods=['POST'])
+def get_detailed_summary():
+    """Generate DETAILED summary (comprehensive analysis)"""
     try:
         data = request.json
-        
         video_id = data.get('video_id')
-        url = data.get('url', '')
-        language = data.get('language', 'en')
-        length = data.get('length', 'medium')
-        
-        if not video_id:
-            video_id = extract_video_id(url)
         
         if not video_id:
             return jsonify({
                 'success': False,
-                'error': 'Please provide a valid video_id or YouTube URL'
+                'error': 'video_id is required'
             }), 400
         
-        start_time = time.time()
+        result = generate_summary(video_id, 'detailed')
         
-        transcript_result = get_transcript(
-            video_id, 
-            language,
-            use_cookies=True,
-            cookie_file=os.getenv('COOKIE_FILE', 'utils/cookies.txt')
-        )
+        if not result['success']:
+            return jsonify(result), 400
         
-        if not transcript_result['success']:
-            return jsonify(transcript_result), 400
-        
-        plain_text = format_transcript_plain(transcript_result['transcript'])
-        summary_result = generate_summary(plain_text, length)
-        
-        if not summary_result['success']:
-            return jsonify(summary_result), 400
-        
-        video_info_result = get_video_info(video_id)
-        processing_time = round(time.time() - start_time, 2)
-        
-        return jsonify({
-            'success': True,
-            'video_id': video_id,
-            'summary': summary_result['summary'],
-            'word_count': summary_result['word_count'],
-            'reading_time': summary_result['reading_time'],
-            'processing_time': processing_time,
-            'video_info': video_info_result,
-            'length': summary_result['length']
-        })
+        return jsonify(result)
     
     except Exception as e:
         return jsonify({
             'success': False,
-            'error': f'An error occurred: {str(e)}'
+            'error': str(e)
+        }), 500
+    
+@app.route('/api/summary/medium', methods=['POST'])
+def get_medium_summary():
+    """Generate MEDIUM summary (4-6 sentences, detailed points)"""
+    try:
+        data = request.json
+        video_id = data.get('video_id')
+        
+        if not video_id:
+            return jsonify({
+                'success': False,
+                'error': 'video_id is required'
+            }), 400
+        
+        result = generate_summary(video_id, 'medium')
+        
+        if not result['success']:
+            return jsonify(result), 400
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+    
+
+@app.route('/api/summary/short', methods=['POST'])
+def get_short_summary():
+    """Generate SHORT summary (2-3 sentences, key points)"""
+    try:
+        data = request.json
+        video_id = data.get('video_id')
+        
+        if not video_id:
+            return jsonify({
+                'success': False,
+                'error': 'video_id is required'
+            }), 400
+        
+        result = generate_summary(video_id, 'short')
+        
+        if not result['success']:
+            return jsonify(result), 400
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 @app.route('/api/languages', methods=['POST'])

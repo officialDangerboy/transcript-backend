@@ -15,8 +15,9 @@ summary_bp = Blueprint('summary', __name__)
 def get_random_gemini_key():
     """Get random Gemini API key from pool"""
     api_keys = [
-        os.getenv('GEMINI_KEY_1', 'AIzaSyAV1E3d1JIv3hhpe1dJwG06qVl7OSZz4GE'),
-        os.getenv('GEMINI_KEY_2', 'AIzaSyBBttGpLmaR1Vq3gM8z46G6jsNsttV_GyU'),
+        os.getenv('GEMINI_KEY_1', 'AIzaSyCW3jBTKqFQvOUAD6D1nXvbDC4kqJ5QrqM'),
+        os.getenv('GEMINI_KEY_2', 'AIzaSyCa2F_ZEyZ-j3u0BgU12vm9NRhR7ZHXUBI'),
+        os.getenv('GEMINI_KEY_3', 'AIzaSyAj53qP6T87uJPKNHJ6X57m8uN0ytrGfVo'),
     ]
     return random.choice(api_keys)
 
@@ -96,7 +97,7 @@ def fetch_transcript(video_id: str) -> Dict:
 
 # ======================================================
 # CLEAN & COMPRESS TRANSCRIPT
-# ======================================================
+# ============================================= =========
 # ======================================================
 # CLEAN & COMPRESS TRANSCRIPT (IMPROVED)
 # ======================================================

@@ -15,9 +15,8 @@ summary_bp = Blueprint('summary', __name__)
 def get_random_gemini_key():
     """Get random Gemini API key from pool"""
     api_keys = [
-        os.getenv('GEMINI_KEY_1', 'AIzaSyCW3jBTKqFQvOUAD6D1nXvbDC4kqJ5QrqM'),
-        os.getenv('GEMINI_KEY_2', 'AIzaSyCa2F_ZEyZ-j3u0BgU12vm9NRhR7ZHXUBI'),
-        os.getenv('GEMINI_KEY_3', 'AIzaSyAj53qP6T87uJPKNHJ6X57m8uN0ytrGfVo'),
+        os.getenv('GEMINI_KEY_1', 'AIzaSyCa2F_ZEyZ-j3u0BgU12vm9NRhR7ZHXUBI'),
+        os.getenv('GEMINI_KEY_2', 'AIzaSyAj53qP6T87uJPKNHJ6X57m8uN0ytrGfVo'),
     ]
     return random.choice(api_keys)
 

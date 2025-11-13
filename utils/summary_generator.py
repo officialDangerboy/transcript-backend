@@ -16,8 +16,6 @@ def get_random_gemini_key():
     """Get random Gemini API key from pool"""
     api_keys = [
         os.getenv('GEMINI_KEY_1'),
-        os.getenv('GEMINI_KEY_2'),
-        os.getenv('GEMINI_KEY_3'),
     ]
     # Filter out None values
     valid_keys = [k for k in api_keys if k]
@@ -31,6 +29,8 @@ def get_random_groq_key():
         os.getenv('GROQ_KEY_1'),
         os.getenv('GROQ_KEY_2'),
         os.getenv('GROQ_KEY_3'),
+        os.getenv('GROQ_KEY_4'),
+        os.getenv('GROQ_KEY_5'),
     ]
     # Filter out None values
     valid_keys = [k for k in api_keys if k]

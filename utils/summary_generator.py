@@ -10,36 +10,16 @@ from flask import Blueprint, request, jsonify
 summary_bp = Blueprint('summary', __name__)
 
 # ======================================================
-# API CONFIGURATION (GEMINI + GROQ)
+# GEMINI API CONFIGURATION
 # ======================================================
 def get_random_gemini_key():
     """Get random Gemini API key from pool"""
     api_keys = [
-        os.getenv('GEMINI_KEY_1'),
-        os.getenv('GEMINI_KEY_2'),
-        os.getenv('GEMINI_KEY_3'),
+        os.getenv('GEMINI_KEY_1', 'AIzaSyDZHY6tpafja6iou2NiCQychwu6jjoykOY'),
     ]
-    # Filter out None values
-    valid_keys = [k for k in api_keys if k]
-    if not valid_keys:
-        raise ValueError("No Gemini API keys found in environment variables")
-    return random.choice(valid_keys)
-
-def get_random_groq_key():
-    """Get random Groq API key from pool"""
-    api_keys = [
-        os.getenv('GROQ_KEY_1'),
-        os.getenv('GROQ_KEY_2'),
-        os.getenv('GROQ_KEY_3'),
-    ]
-    # Filter out None values
-    valid_keys = [k for k in api_keys if k]
-    if not valid_keys:
-        raise ValueError("No Groq API keys found in environment variables")
-    return random.choice(valid_keys)
+    return random.choice(api_keys)
 
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 TRANSCRIPT_API_URL = "https://vid-smart-sum.vercel.app/api/transcript/fetch"
 
 # ======================================================
@@ -71,11 +51,13 @@ def fetch_transcript(video_id: str) -> Dict:
                     'cached': data.get('cached', False)
                 }
             else:
+                # API returned 200 but success=false
                 return {
                     'success': False,
                     'error': data.get('error', 'Unknown error from transcript API')
                 }
         
+        # Handle non-200 responses
         try:
             error_data = response.json()
             error_msg = error_data.get('error', response.text)
@@ -111,15 +93,21 @@ def fetch_transcript(video_id: str) -> Dict:
             'error': f'Failed to fetch transcript: {str(e)}'
         }
 
+# ======================================================
+# CLEAN & COMPRESS TRANSCRIPT
+# ============================================= =========
+# ======================================================
+# CLEAN & COMPRESS TRANSCRIPT (IMPROVED)
+# ======================================================
 def clean_segments(segments: List[Dict]) -> List[Dict]:
     """Clean and normalize segment data"""
     cleaned = []
     for seg in segments:
         text = seg.get('text', '').strip()
-        if not text or len(text) < 3:
+        if not text or len(text) < 3:  # Skip empty or too short
             continue
         
-        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'\s+', ' ', text)  # Normalize whitespace
         
         cleaned.append({
             'text': text,
@@ -139,7 +127,11 @@ def get_time_based_chunks(segments: List[Dict], start_seconds: float, end_second
 def compress_transcript_smart(segments: List[Dict]) -> Dict:
     """
     Smart compression: Extract key sections for coherent summary
-    Total: ~25% of original content
+    - First 30 seconds (introduction)
+    - Middle 30 seconds (core content)
+    - Last 30 seconds (conclusion)
+    - Top segments from each section
+    Total: ~25% of original content (keeping 25%, removing 75%)
     """
     if not segments or len(segments) == 0:
         return {'segments': [], 'full_text': '', 'reduction_percent': 0}
@@ -149,27 +141,36 @@ def compress_transcript_smart(segments: List[Dict]) -> Dict:
     
     print(f"📹 Video duration: {video_duration:.1f}s, Total segments: {total_segments}")
     
-    # Extract intro, middle, outro sections
+    # === SECTION 1: First 30 seconds (Introduction) ===
     intro_segments = get_time_based_chunks(segments, 0, 30)
+    # Keep 30% of intro segments
     intro_keep = max(1, int(len(intro_segments) * 0.30)) if intro_segments else 0
     intro_top = sorted(intro_segments, key=lambda s: len(s['text'].split()), reverse=True)[:intro_keep]
     
-    middle_start = (video_duration / 2) - 15
-    middle_end = (video_duration / 2) + 15
+    # === SECTION 2: Middle 30 seconds (Core content) ===
+    middle_start = (video_duration / 2) - 15  # 15s before middle
+    middle_end = (video_duration / 2) + 15    # 15s after middle
     middle_segments = get_time_based_chunks(segments, middle_start, middle_end)
+    # Keep 30% of middle segments
     middle_keep = max(1, int(len(middle_segments) * 0.30)) if middle_segments else 0
     middle_top = sorted(middle_segments, key=lambda s: len(s['text'].split()), reverse=True)[:middle_keep]
     
+    # === SECTION 3: Last 30 seconds (Conclusion) ===
     outro_start = max(0, video_duration - 30)
     outro_segments = get_time_based_chunks(segments, outro_start, video_duration)
+    # Keep 30% of outro segments
     outro_keep = max(1, int(len(outro_segments) * 0.30)) if outro_segments else 0
     outro_top = sorted(outro_segments, key=lambda s: len(s['text'].split()), reverse=True)[:outro_keep]
     
+    # === SECTION 4: Additional key segments from entire video ===
+    # Get top 20% most information-dense segments from everywhere
     all_dense = sorted(segments, key=lambda s: len(s['text'].split()), reverse=True)
-    additional_keep = int(total_segments * 0.20)
+    additional_keep = int(total_segments * 0.20)  # 20% additional
     additional_segments = all_dense[:additional_keep]
     
+    # === COMBINE & DEDUPLICATE ===
     combined = intro_top + middle_top + outro_top + additional_segments
+    # Remove duplicates by segment start time
     seen_times = set()
     unique_segments = []
     for seg in combined:
@@ -177,15 +178,18 @@ def compress_transcript_smart(segments: List[Dict]) -> Dict:
             seen_times.add(seg['start'])
             unique_segments.append(seg)
     
+    # Sort by timestamp to maintain flow
     compressed = sorted(unique_segments, key=lambda s: s['start'])
     
+    # Build full text with smooth transitions
     text_parts = []
     for i, seg in enumerate(compressed):
         text_parts.append(seg['text'])
+        # Add transition marker if there's a big time gap (>10s)
         if i < len(compressed) - 1:
             time_gap = compressed[i + 1]['start'] - seg['end']
             if time_gap > 10:
-                text_parts.append('[...]')
+                text_parts.append('[...]')  # Indicate skipped content
     
     compressed_text = ' '.join(text_parts)
     original_text = ' '.join(s['text'] for s in segments)
@@ -193,6 +197,7 @@ def compress_transcript_smart(segments: List[Dict]) -> Dict:
     reduction = 1 - (len(compressed) / total_segments)
     
     print(f"📊 Compression: {total_segments} → {len(compressed)} segments ({reduction*100:.1f}% reduction)")
+    print(f"📝 Text: {len(original_text)} → {len(compressed_text)} chars")
     
     return {
         'segments': compressed,
@@ -206,127 +211,6 @@ def compress_transcript_smart(segments: List[Dict]) -> Dict:
             'outro': len(outro_top),
             'additional': len(additional_segments)
         }
-    }
-
-# ======================================================
-# GROQ API CALL
-# ======================================================
-def call_groq(prompt: str, temperature: float = 0.7, model: str = "llama-3.3-70b-versatile") -> Dict:
-    """
-    Call Groq API with retry logic
-    Available models:
-    - llama-3.3-70b-versatile (recommended for summaries)
-    - llama-3.1-70b-versatile
-    - mixtral-8x7b-32768
-    """
-    api_key = get_random_groq_key()
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "temperature": temperature,
-        "max_tokens": 2500,
-        "top_p": 0.95,
-        "stream": False
-    }
-    
-    for attempt in range(3):
-        try:
-            print(f"🚀 Calling Groq API (attempt {attempt + 1}/3) with model: {model}")
-            
-            response = requests.post(
-                GROQ_API_URL,
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-            
-            print(f"📥 Groq Response Status: {response.status_code}")
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                if 'choices' in result and len(result['choices']) > 0:
-                    choice = result['choices'][0]
-                    message = choice.get('message', {})
-                    response_text = message.get('content', '').strip()
-                    
-                    if response_text:
-                        print(f"✅ Got Groq response: {len(response_text)} characters")
-                        return {
-                            'success': True,
-                            'text': response_text,
-                            'model': model
-                        }
-                
-                print(f"⚠️ Unexpected Groq response format: {result}")
-                return {
-                    'success': False,
-                    'error': 'Unexpected response format from Groq',
-                    'details': str(result)
-                }
-            
-            elif response.status_code == 429:
-                print(f"⏳ Groq rate limited, trying another key...")
-                if attempt < 2:
-                    api_key = get_random_groq_key()
-                    headers["Authorization"] = f"Bearer {api_key}"
-                    time.sleep(2)
-                    continue
-                return {
-                    'success': False,
-                    'error': 'Rate limit exceeded on all Groq API keys'
-                }
-            
-            elif response.status_code == 400:
-                error_data = response.json()
-                error_msg = error_data.get('error', {}).get('message', 'Bad request')
-                print(f"❌ Bad request: {error_msg}")
-                return {
-                    'success': False,
-                    'error': f'Groq API error: {error_msg}'
-                }
-            
-            else:
-                print(f"❌ Groq API error {response.status_code}: {response.text}")
-                return {
-                    'success': False,
-                    'error': f'Groq API error: {response.status_code}'
-                }
-        
-        except requests.exceptions.Timeout:
-            print(f"⏱️ Groq request timeout (attempt {attempt + 1})")
-            if attempt < 2:
-                time.sleep(2)
-                continue
-            return {
-                'success': False,
-                'error': 'Groq API request timed out'
-            }
-        
-        except Exception as e:
-            print(f"💥 Groq error: {str(e)}")
-            if attempt < 2:
-                time.sleep(2)
-                continue
-            return {
-                'success': False,
-                'error': f'Groq API call failed: {str(e)}'
-            }
-    
-    return {
-        'success': False,
-        'error': 'Max retries exceeded'
     }
 
 # ======================================================
@@ -359,7 +243,7 @@ def call_gemini(prompt: str, temperature: float = 0.7) -> Dict:
                 url,
                 headers={"Content-Type": "application/json"},
                 json=payload,
-                timeout=60
+                timeout=60  # Increased timeout
             )
             
             print(f"📥 Gemini Response Status: {response.status_code}")
@@ -367,6 +251,7 @@ def call_gemini(prompt: str, temperature: float = 0.7) -> Dict:
             if response.status_code == 200:
                 result = response.json()
                 
+                # Handle response structure
                 if 'candidates' in result and len(result['candidates']) > 0:
                     candidate = result['candidates'][0]
                     content = candidate.get('content', {})
@@ -374,14 +259,14 @@ def call_gemini(prompt: str, temperature: float = 0.7) -> Dict:
                     
                     if parts and 'text' in parts[0]:
                         response_text = parts[0]['text'].strip()
-                        print(f"✅ Got Gemini response: {len(response_text)} characters")
+                        print(f"✅ Got response: {len(response_text)} characters")
                         return {
                             'success': True,
-                            'text': response_text,
-                            'model': 'gemini-2.0-flash-exp'
+                            'text': response_text
                         }
                 
-                print(f"⚠️ Unexpected Gemini response format: {result}")
+                # If we reach here, response format was unexpected
+                print(f"⚠️ Unexpected response format: {result}")
                 return {
                     'success': False,
                     'error': 'Unexpected response format from Gemini',
@@ -389,7 +274,7 @@ def call_gemini(prompt: str, temperature: float = 0.7) -> Dict:
                 }
             
             elif response.status_code == 429:
-                print(f"⏳ Gemini rate limited, trying another key...")
+                print(f"⏳ Rate limited, trying another key...")
                 if attempt < 2:
                     api_key = get_random_gemini_key()
                     url = f"{GEMINI_API_URL}?key={api_key}"
@@ -397,7 +282,7 @@ def call_gemini(prompt: str, temperature: float = 0.7) -> Dict:
                     continue
                 return {
                     'success': False,
-                    'error': 'Rate limit exceeded on all Gemini API keys'
+                    'error': 'Rate limit exceeded on all API keys'
                 }
             
             elif response.status_code == 400:
@@ -410,14 +295,14 @@ def call_gemini(prompt: str, temperature: float = 0.7) -> Dict:
                 }
             
             else:
-                print(f"❌ Gemini API error {response.status_code}: {response.text}")
+                print(f"❌ API error {response.status_code}: {response.text}")
                 return {
                     'success': False,
                     'error': f'Gemini API error: {response.status_code}'
                 }
         
         except requests.exceptions.Timeout:
-            print(f"⏱️ Gemini request timeout (attempt {attempt + 1})")
+            print(f"⏱️ Request timeout (attempt {attempt + 1})")
             if attempt < 2:
                 time.sleep(2)
                 continue
@@ -427,7 +312,7 @@ def call_gemini(prompt: str, temperature: float = 0.7) -> Dict:
             }
         
         except Exception as e:
-            print(f"💥 Gemini error: {str(e)}")
+            print(f"💥 Error: {str(e)}")
             if attempt < 2:
                 time.sleep(2)
                 continue
@@ -440,38 +325,6 @@ def call_gemini(prompt: str, temperature: float = 0.7) -> Dict:
         'success': False,
         'error': 'Max retries exceeded'
     }
-
-# ======================================================
-# UNIFIED API CALLER WITH FALLBACK
-# ======================================================
-def call_ai_api(prompt: str, temperature: float = 0.7, preferred_api: str = 'groq') -> Dict:
-    """
-    Call AI API with automatic fallback
-    preferred_api: 'groq' or 'gemini'
-    Falls back to the other API if the preferred one fails
-    """
-    if preferred_api == 'groq':
-        print("🎯 Using Groq as primary API")
-        result = call_groq(prompt, temperature)
-        
-        if not result['success']:
-            print("⚠️ Groq failed, falling back to Gemini...")
-            result = call_gemini(prompt, temperature)
-            if result['success']:
-                result['fallback'] = True
-                result['primary_api'] = 'groq'
-    else:
-        print("🎯 Using Gemini as primary API")
-        result = call_gemini(prompt, temperature)
-        
-        if not result['success']:
-            print("⚠️ Gemini failed, falling back to Groq...")
-            result = call_groq(prompt, temperature)
-            if result['success']:
-                result['fallback'] = True
-                result['primary_api'] = 'gemini'
-    
-    return result
 
 # ======================================================
 # SUMMARY PROMPTS
@@ -596,17 +449,19 @@ Return ONLY valid JSON in this exact format (no markdown, no extra text):
 Provide comprehensive analysis with actionable insights and clear structure."""
 
 # ======================================================
-# PARSE JSON FROM AI RESPONSE
+# PARSE JSON FROM GEMINI RESPONSE
 # ======================================================
 def parse_json_response(text: str) -> Dict:
     """
-    Extract and parse JSON from AI response
+    Extract and parse JSON from Gemini response
     """
     try:
+        # Remove markdown code blocks if present
         text = re.sub(r'```json\s*', '', text)
         text = re.sub(r'```\s*', '', text)
         text = text.strip()
         
+        # Try to find JSON object
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
         if json_match:
             import json
@@ -620,10 +475,9 @@ def parse_json_response(text: str) -> Dict:
 # ======================================================
 # GENERATE SUMMARY
 # ======================================================
-def generate_summary(video_id: str, summary_type: str = 'medium', api_preference: str = 'groq') -> Dict:
+def generate_summary(video_id: str, summary_type: str = 'medium') -> Dict:
     """
     Main function to generate summary
-    api_preference: 'groq' or 'gemini' (defaults to 'groq')
     """
     try:
         # 1. Fetch transcript
@@ -647,7 +501,7 @@ def generate_summary(video_id: str, summary_type: str = 'medium', api_preference
         print(f"🧹 Cleaning {len(segments)} segments...")
         cleaned_segments = clean_segments(segments)
         
-        # 3. Compress transcript
+        # 3. Compress transcript (smart 25% extraction)
         print(f"🗜️ Compressing transcript...")
         compressed = compress_transcript_smart(cleaned_segments)
         
@@ -658,21 +512,21 @@ def generate_summary(video_id: str, summary_type: str = 'medium', api_preference
             summary_type
         )
         
-        # 5. Call AI API (with fallback)
-        print(f"🤖 Generating {summary_type} summary (preferred: {api_preference})...")
-        ai_result = call_ai_api(prompt, temperature=0.7, preferred_api=api_preference)
+        # 5. Call Gemini
+        print(f"🤖 Generating {summary_type} summary with Gemini...")
+        gemini_result = call_gemini(prompt, temperature=0.7)
         
-        if not ai_result['success']:
-            return ai_result
+        if not gemini_result['success']:
+            return gemini_result
         
         # 6. Parse JSON response
-        parsed_json = parse_json_response(ai_result['text'])
+        parsed_json = parse_json_response(gemini_result['text'])
         
         if not parsed_json:
             return {
                 'success': False,
                 'error': 'Failed to parse AI response into JSON',
-                'raw_response': ai_result['text']
+                'raw_response': gemini_result['text']
             }
         
         # 7. Return structured response
@@ -692,11 +546,6 @@ def generate_summary(video_id: str, summary_type: str = 'medium', api_preference
                 'language': data.get('language', 'unknown'),
                 'word_count': data.get('word_count', 0),
                 'channel_name': data.get('channel_name', 'Unknown')
-            },
-            'api_info': {
-                'model': ai_result.get('model', 'unknown'),
-                'fallback_used': ai_result.get('fallback', False),
-                'primary_api': ai_result.get('primary_api', api_preference)
             }
         }
     

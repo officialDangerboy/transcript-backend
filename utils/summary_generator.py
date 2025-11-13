@@ -15,16 +15,28 @@ summary_bp = Blueprint('summary', __name__)
 def get_random_gemini_key():
     """Get random Gemini API key from pool"""
     api_keys = [
-        os.getenv('GEMINI_KEY_1', 'AIzaSyDZHY6tpafja6iou2NiCQychwu6jjoykOY'),
+        os.getenv('GEMINI_KEY_1'),
+        os.getenv('GEMINI_KEY_2'),
+        os.getenv('GEMINI_KEY_3'),
     ]
-    return random.choice(api_keys)
+    # Filter out None values
+    valid_keys = [k for k in api_keys if k]
+    if not valid_keys:
+        raise ValueError("No Gemini API keys found in environment variables")
+    return random.choice(valid_keys)
 
 def get_random_groq_key():
     """Get random Groq API key from pool"""
     api_keys = [
-        os.getenv('GROQ_KEY_1', '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'),
+        os.getenv('GROQ_KEY_1'),
+        os.getenv('GROQ_KEY_2'),
+        os.getenv('GROQ_KEY_3'),
     ]
-    return random.choice(api_keys)
+    # Filter out None values
+    valid_keys = [k for k in api_keys if k]
+    if not valid_keys:
+        raise ValueError("No Groq API keys found in environment variables")
+    return random.choice(valid_keys)
 
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
